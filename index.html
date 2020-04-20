@@ -2,24 +2,32 @@
 
 <html>
   <head>
-    <title>Bike routing</title>
+    <title>Raleigh Sidewalks</title>
     <style>
       body {
         margin: 0;
         padding: 0;
       }
+
+      .wrapper {
+        display: flex;
+      }
     </style>
   </head>
   <body>
-    <canvas
-      id="canvas"
-      style="width: 800px; height: 800px;"
-      width="1600"
-      height="1600"
-    ></canvas>
+    <div id="wrapper">
+      <div>
+        <button id="regen">New random start point</button>
+        <div id="loading">Loading...</div>
+      </div>
+      <canvas
+        id="canvas"
+        style="width: 800px; height: 800px;"
+        width="1600"
+        height="1600"
+      ></canvas>
+  </div>
   </body>
-
-  <script src="https://unpkg.com/rbush@2.0.1/rbush.min.js"></script>
 
   <script>
     class FlatQueue {
@@ -275,29 +283,42 @@
       return dists;
     }
 
+    function drawPin(x, y, color) {
+      ctx.save();
+      ctx.translate(x, y);
+
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(2, -10, -20, -25, 0, -30);
+      ctx.bezierCurveTo(20, -25, -2, -10, 0, 0);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = "black";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, -21, 3, 0, Math.PI * 2);
+      ctx.closePath();
+      ctx.fillStyle = "black";
+      ctx.fill();
+
+      ctx.restore();
+    }
+  
     function drawDistanceGraph(graph) {
-      // drawGraph(graph);
-
       const startVert = (graph.verts.length * Math.random()) | 0;
-
-      drawFilledVert(
-        graph.verts[startVert][0],
-        graph.verts[startVert][1],
-        32,
-        "black"
-      );
-
       const dists = dijkstra(graph, startVert);
 
       drawVertexDists(graph, dists);
+
+      drawPin(graph.verts[startVert][0], graph.verts[startVert][1], "red")
     }
-
-
 
     // this draws a grid testing dijkstra
 
     // const grid = makeGridGraph(24, 24, 600, 600, 50, 50);
 
+    // drawGraph(grid);
     // drawDistanceGraph(grid);
 
     // make it faster with priority queue
@@ -335,7 +356,7 @@
       }
     }
 
-    function boundingBoxFromFeatureCollection(fc) {
+    function featureCollectionBoundingBox(fc) {
       const bb = boundingBoxNew();
 
       for (const elem of fc.features) {
@@ -538,9 +559,13 @@
       }
 
       // this is hacky
-      function vertHash(x,y) {
+      function vertHash(x, y) {
         const factor = 1e7;
-        return (Math.round(x * factor) / factor) + "," + (Math.round(x * factor) / factor);
+        return (
+          Math.round(x * factor) / factor +
+          "," +
+          Math.round(x * factor) / factor
+        );
       }
 
       for (const elem of fc.features) {
@@ -574,7 +599,10 @@
         }
       }
 
-      return graphNew(verts.map(a => scalePt(a[0], a[1])), edges);
+      return graphNew(
+        verts.map((a) => scalePt(a[0], a[1])),
+        edges
+      );
     }
 
     async function fetchMap() {
@@ -583,9 +611,9 @@
       const data = await fetch("map.json");
       const fc = await data.json();
 
-      console.log(fc);
+      document.getElementById("loading").remove();
 
-      const bb = boundingBoxFromFeatureCollection(fc);
+      const bb = featureCollectionBoundingBox(fc);
 
       drawFeatureCollection(
         fc,
@@ -595,25 +623,27 @@
         (e) => e.properties.highway === "footway"
       );
 
-
       // const graphData = await fetch("graphBigFootways.json");
       // const graph = await graphData.json();
 
-      const graph = featureCollectionToGraph(fc, bb, 600, 600,        (e) => {
+      const graph = featureCollectionToGraph(fc, bb, 600, 600, (e) => {
         return e.properties.highway === "footway";
       });
 
       console.log(JSON.stringify(graph));
 
-
       drawDistanceGraph(graph);
     }
 
     async function fetchBigMap() {
-      const data = await fetch("mapBig.json");
-      const fc = await data.json();
+      const [fc, graph] = await Promise.all([
+        (await fetch("mapBig.json")).json(),
+        (await fetch("graphBigFootways.json")).json(),
+      ]);
 
-      const bb = boundingBoxFromFeatureCollection(fc);
+      document.getElementById("loading").remove();
+
+      const bb = featureCollectionBoundingBox(fc);
 
       drawFeatureCollection(
         fc,
@@ -623,19 +653,23 @@
         (e) => e.properties.highway !== undefined
       );
 
-      const graphData = await fetch("graphBigFootways.json");
-      const graph = await graphData.json();
-
-      // const graph = featureCollectionToGraph(fc, bb, 1200, 1200,        (e) => {
-      //   return e.properties.highway === "footway";
-      // });
-
-      // console.log(JSON.stringify(graph));
-
       drawDistanceGraph(graph);
+
+      document.getElementById("regen").addEventListener("click", () => {
+        ctx.clearRect(0,0,1600,1600)
+        drawFeatureCollection(
+          fc,
+          bb,
+          1200,
+          1200,
+          (e) => e.properties.highway !== undefined
+        );
+
+        drawDistanceGraph(graph);
+      });
     }
 
     fetchBigMap();
   </script>
 </html>
-`
+
