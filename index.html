@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+
+<html>
+  <head>
+    <title>Bike routing</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas
+      id="canvas"
+      style="width: 800px; height: 800px;"
+      width="1600"
+      height="1600"
+    ></canvas>
+  </body>
+
+  <script src="https://unpkg.com/rbush@2.0.1/rbush.min.js"></script>
+
+  <script>
+    class FlatQueue {
+      constructor() {
+        this.ids = [];
+        this.values = [];
+        this.length = 0;
+      }
+
+      clear() {
+        this.length = 0;
+      }
+
+      push(id, value) {
+        let pos = this.length++;
+        this.ids[pos] = id;
+        this.values[pos] = value;
+
+        while (pos > 0) {
+          const parent = (pos - 1) >> 1;
+          const parentValue = this.values[parent];
+          if (value >= parentValue) break;
+          this.ids[pos] = this.ids[parent];
+          this.values[pos] = parentValue;
+          pos = parent;
+        }
+
+        this.ids[pos] = id;
+        this.values[pos] = value;
+      }
+
+      pop() {
+        if (this.length === 0) return undefined;
+
+        const top = this.ids[0];
+        this.length--;
+
+        if (this.length > 0) {
+          const id = (this.ids[0] = this.ids[this.length]);
+          const value = (this.values[0] = this.values[this.length]);
+          const halfLength = this.length >> 1;
+          let pos = 0;
+
+          while (pos < halfLength) {
+            let left = (pos << 1) + 1;
+            const right = left + 1;
+            let bestIndex = this.ids[left];
+            let bestValue = this.values[left];
+            const rightValue = this.values[right];
+
+            if (right < this.length && rightValue < bestValue) {
+              left = right;
+              bestIndex = this.ids[right];
+              bestValue = rightValue;
+            }
+            if (bestValue >= value) break;
+
+            this.ids[pos] = bestIndex;
+            this.values[pos] = bestValue;
+            pos = left;
+          }
+
+          this.ids[pos] = id;
+          this.values[pos] = value;
+        }
+
+        return top;
+      }
+
+      peek() {
+        return this.ids[0];
+      }
+
+      peekValue() {
+        return this.values[0];
+      }
+    }
+
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+
+    function drawLine(ax, ay, bx, by, style = "grey") {
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.lineTo(bx, by);
+      ctx.strokeStyle = style;
+      ctx.stroke();
+    }
+
+    function drawStrokedVert(x, y, r = 3, style = "grey") {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 2 * Math.PI);
+      ctx.strokeStyle = style;
+      ctx.stroke();
+    }
+
+    function drawFilledVert(x, y, r = 3, style = "grey") {
+      ctx.beginPath();
+      ctx.arc(x, y, r, 0, 2 * Math.PI);
+      ctx.fillStyle = style;
+      ctx.fill();
+    }
+
+    function drawGraph(graph) {
+      const { verts, edges } = graph;
+
+      for (const [a, b] of edges) {
+        const [ax, ay] = verts[a];
+        const [bx, by] = verts[b];
+
+        drawLine(ax, ay, bx, by);
+      }
+
+      for (const [x, y] of verts) {
+        drawStrokedVert(x, y);
+      }
+    }
+
+    function drawVertexDists({ verts }, dists) {
+      let max = 0;
+      for (let i = 0, l = verts.length; i < l; i++) {
+        if (dists[i] > max && dists[i] !== Number.POSITIVE_INFINITY) {
+          max = dists[i];
+        }
+      }
+
+      for (let i = 0, l = verts.length; i < l; i++) {
+        const [x, y] = verts[i];
+        if (dists[i] === Number.POSITIVE_INFINITY) {
+          drawFilledVert(x, y, 1, "grey");
+        } else {
+          drawFilledVert(
+            x,
+            y,
+            3,
+            `rgb(${(255 * dists[i]) / max},0,${255 - (255 * dists[i]) / max})`
+          );
+        }
+      }
+    }
+
+    function range(min, max, step) {
+      const a = [];
+      for (let x = min; x <= max + 1e-3; x += step) {
+        a.push(x);
+      }
+      return a;
+    }
+
+    function makeGridGraph(x, y, width, height, rows, cols) {
+      const xstep = width / (cols - 1);
+      const ystep = height / (rows - 1);
+
+      const verts = [];
+      const edges = [];
+
+      for (const yy of range(y, y + height, xstep)) {
+        for (const xx of range(x, x + width, ystep)) {
+          verts.push([xx, yy]);
+        }
+      }
+
+      // generate row edges
+
+      for (let i = 0; i < rows; i++) {
+        for (let j = 0; j < cols - 1; j++) {
+          if (Math.random() < 0.5) continue;
+          edges.push([i * rows + j, i * rows + j + 1]);
+        }
+      }
+
+      // generate col edges
+
+      for (let i = 0; i < rows - 1; i++) {
+        for (let j = 0; j < cols; j++) {
+          if (Math.random() < 0.5) continue;
+          edges.push([i * rows + j, (i + 1) * rows + j]);
+        }
+      }
+
+      return graphNew(verts, edges);
+    }
+
+    function graphNew(verts, edges) {
+      const graph = { verts, edges, adjacent: [] };
+
+      for (let i = 0, l = graph.verts.length; i < l; i++) {
+        const a = [];
+        for (const [start, end] of graph.edges) {
+          if (start === i) {
+            a.push(end);
+          } else if (end === i) {
+            a.push(start);
+          }
+        }
+
+        graph.adjacent[i] = a;
+      }
+
+      return graph;
+    }
+
+    function fill(count, value) {
+      const a = new Array(count);
+      for (let i = 0; i < count; i++) a[i] = value;
+      return a;
+    }
+
+    function rangeFromZero(count) {
+      const a = new Array(count);
+      for (let i = 0; i < count; i++) a[i] = i;
+      return a;
+    }
+
+    function rangeFromZeroMap(count) {
+      const a = {};
+      for (let i = 0; i < count; i++) a[i] = i;
+      return a;
+    }
+
+    function allTrue(a) {
+      return a.filter((x) => x === true).length === a.length;
+    }
+
+    function dijkstra(graph, src) {
+      const { verts, edges } = graph;
+
+      const dists = [];
+      dists[src] = 0;
+
+      const q = new FlatQueue();
+
+      for (let i = 0, l = verts.length; i < l; i++) {
+        if (i === src) {
+          q.push(i, 0);
+        } else {
+          q.push(i, (dists[i] = Number.POSITIVE_INFINITY));
+        }
+      }
+
+      for (let i = 0; i < q.ids.length; i++) {
+        const u = q.pop();
+
+        for (const v of graph.adjacent[u]) {
+          const alt = dists[u] + 1; // TODO what is dist?
+          if (alt < dists[v]) {
+            dists[v] = alt;
+            q.push(v, alt);
+          }
+        }
+      }
+
+      return dists;
+    }
+
+    function drawDistanceGraph(graph) {
+      // drawGraph(graph);
+
+      const startVert = (graph.verts.length * Math.random()) | 0;
+
+      drawFilledVert(
+        graph.verts[startVert][0],
+        graph.verts[startVert][1],
+        32,
+        "black"
+      );
+
+      const dists = dijkstra(graph, startVert);
+
+      drawVertexDists(graph, dists);
+    }
+
+
+
+    // this draws a grid testing dijkstra
+
+    // const grid = makeGridGraph(24, 24, 600, 600, 50, 50);
+
+    // drawDistanceGraph(grid);
+
+    // make it faster with priority queue
+    // how to get OSM data to run in this
+    // how to assign grading rubric to streets?
+
+    function boundingBoxNew() {
+      return [
+        Number.MAX_VALUE,
+        Number.MAX_VALUE,
+        -Number.MAX_VALUE,
+        -Number.MAX_VALUE,
+      ];
+    }
+
+    function boundingBoxWidthHeight(bb) {
+      return [bb[2] - bb[0], bb[3] - bb[1]];
+    }
+
+    function boundingBoxAddPoint(bb, point) {
+      if (point[0] < bb[0]) {
+        bb[0] = point[0];
+      }
+
+      if (point[1] < bb[1]) {
+        bb[1] = point[1];
+      }
+
+      if (point[0] > bb[2]) {
+        bb[2] = point[0];
+      }
+
+      if (point[1] > bb[3]) {
+        bb[3] = point[1];
+      }
+    }
+
+    function boundingBoxFromFeatureCollection(fc) {
+      const bb = boundingBoxNew();
+
+      for (const elem of fc.features) {
+        if (elem.type !== "Feature") {
+          continue;
+        }
+
+        const { geometry } = elem;
+
+        switch (geometry.type) {
+          case "Point": {
+            boundingBoxAddPoint(bb, geometry.coordinates);
+            break;
+          }
+          case "MultiPolygon": {
+            for (const polygon of geometry.coordinates) {
+              for (const pt of polygon) {
+                boundingBoxAddPoint(bb, pt);
+              }
+            }
+            break;
+          }
+          case "LineString": {
+            for (const pt of geometry.coordinates) {
+              boundingBoxAddPoint(bb, pt);
+            }
+            break;
+          }
+          default:
+            console.log("unknown geometry type", geometry.type);
+        }
+      }
+
+      return bb;
+    }
+
+    const DRAWING_WIDTH = 600;
+    const DRAWING_HEIGHT = 600;
+
+    function pointScaleForCanvas(
+      x,
+      y,
+      width,
+      height,
+      minx,
+      miny,
+      dwgWidth,
+      dwgHeight
+    ) {
+      x = x - minx;
+      y = y - miny;
+      x = (dwgWidth * x) / width;
+      y = dwgHeight - (dwgHeight * y) / height;
+      return [x, y];
+    }
+
+    function drawFeatureCollection(fc, bb, dwgWidth, dwgHeight, filter) {
+      const [minx, miny] = bb;
+      const [width, height] = boundingBoxWidthHeight(bb);
+
+      function scalePt(x, y) {
+        return pointScaleForCanvas(
+          x,
+          y,
+          width,
+          height,
+          minx,
+          miny,
+          dwgWidth,
+          dwgHeight
+        );
+      }
+
+      function drawScaledEdge(ax, ay, bx, by, style) {
+        const [tax, tay] = scalePt(ax, ay);
+        const [tbx, tby] = scalePt(bx, by);
+        drawLine(tax, tay, tbx, tby, style);
+      }
+
+      function drawScaledVert(x, y, stroke, style) {
+        const [tx, ty] = scalePt(x, y);
+        drawFilledVert(tx, ty, stroke, style);
+      }
+
+      for (const elem of fc.features) {
+        if (elem.type !== "Feature") {
+          continue;
+        }
+
+        if (filter && !filter(elem)) {
+          continue;
+        }
+
+        const { geometry } = elem;
+
+        switch (geometry.type) {
+          case "Point": {
+            const [x, y] = geometry.coordinates;
+            drawScaledVert(x, y, 1, "grey");
+            break;
+          }
+          case "MultiPolygon": {
+            for (const multipoly of geometry.coordinates) {
+              for (const poly of multipoly) {
+                for (let i = 0, l = poly.length - 1; i < l; i++) {
+                  const [ax, ay] = poly[i];
+                  const [bx, by] = poly[i + 1];
+                  drawScaledEdge(ax, ay, bx, by, "grey");
+                }
+              }
+            }
+            break;
+          }
+          case "LineString": {
+            const polygon = geometry.coordinates;
+
+            const { coords } = geometry.coordinates;
+            const [ax, ay] = polygon[0];
+            const [bx, by] = polygon[polygon.length - 1];
+
+            for (let i = 0, l = polygon.length - 1; i < l; i++) {
+              const [ax, ay] = polygon[i];
+              const [bx, by] = polygon[i + 1];
+              drawScaledEdge(ax, ay, bx, by, "grey");
+              drawScaledVert(ax, ay, 1);
+            }
+            break;
+          }
+          default:
+            console.log("unknown geometry type", geometry.type);
+        }
+      }
+
+      return bb;
+    }
+
+    function pointDist(ax, ay, bx, by) {
+      const dx = bx - ax;
+      const dy = by - ay;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function featureCollectionToGraph(fc, bb, dwgWidth, dwgHeight, filter) {
+      const [minx, miny] = bb;
+      const [width, height] = boundingBoxWidthHeight(bb);
+
+      function scalePt(x, y) {
+        return pointScaleForCanvas(
+          x,
+          y,
+          width,
+          height,
+          minx,
+          miny,
+          dwgWidth,
+          dwgHeight
+        );
+      }
+
+      function drawScaledEdge(ax, ay, bx, by, style) {
+        const [tax, tay] = scalePt(ax, ay);
+        const [tbx, tby] = scalePt(bx, by);
+        drawLine(tax, tay, tbx, tby, style);
+      }
+
+      function drawScaledVert(x, y, radius, style) {
+        const [tx, ty] = scalePt(x, y);
+        drawFilledVert(tx, ty, radius, style);
+      }
+
+      const verts = [];
+      const vertHashes = {};
+      const edges = [];
+
+      function addVert(ax, ay) {
+        for (let i = 0, l = verts.length; i < l; i++) {
+          const [bx, by] = verts[i];
+          if (pointDist(ax, ay, bx, by) < 1e-6) {
+            return i;
+          }
+        }
+
+        verts.push([ax, ay]);
+
+        return verts.length - 1;
+
+        // const ahash = vertHash(ax, ay);
+        // if (!vertHashes[ahash]) {
+        //   vertHashes[ahash] = verts.length;
+        //   // verts.push([ax, ay]);
+        //   verts.push(scalePt(ax, ay));
+        //   return vertHashes[ahash];
+        // } else {
+        //   const hi = vertHashes[ahash];
+        //   const [hax, hay] = verts[hi];
+        //   // console.log(pointDist(hax, hay, ax, ay));
+        // }
+
+        // return vertHashes[ahash];
+      }
+
+      // this is hacky
+      function vertHash(x,y) {
+        const factor = 1e7;
+        return (Math.round(x * factor) / factor) + "," + (Math.round(x * factor) / factor);
+      }
+
+      for (const elem of fc.features) {
+        if (elem.type !== "Feature") {
+          continue;
+        }
+
+        if (filter && !filter(elem)) {
+          continue;
+        }
+
+        const { geometry } = elem;
+
+        switch (geometry.type) {
+          case "LineString": {
+            const polygon = geometry.coordinates;
+
+            for (let i = 0, l = polygon.length - 1; i < l; i++) {
+              const [ax, ay] = polygon[i];
+              const [bx, by] = polygon[i + 1];
+
+              const a = addVert(ax, ay); // duplicates a lot of pts
+              const b = addVert(bx, by);
+
+              edges.push([a, b]);
+            }
+            break;
+          }
+          default:
+            console.log("unknown geometry type", geometry.type);
+        }
+      }
+
+      return graphNew(verts.map(a => scalePt(a[0], a[1])), edges);
+    }
+
+    async function fetchMap() {
+      console.log("fetch");
+
+      const data = await fetch("map.json");
+      const fc = await data.json();
+
+      console.log(fc);
+
+      const bb = boundingBoxFromFeatureCollection(fc);
+
+      drawFeatureCollection(
+        fc,
+        bb,
+        600,
+        600,
+        (e) => e.properties.highway === "footway"
+      );
+
+
+      // const graphData = await fetch("graphBigFootways.json");
+      // const graph = await graphData.json();
+
+      const graph = featureCollectionToGraph(fc, bb, 600, 600,        (e) => {
+        return e.properties.highway === "footway";
+      });
+
+      console.log(JSON.stringify(graph));
+
+
+      drawDistanceGraph(graph);
+    }
+
+    async function fetchBigMap() {
+      const data = await fetch("mapBig.json");
+      const fc = await data.json();
+
+      const bb = boundingBoxFromFeatureCollection(fc);
+
+      drawFeatureCollection(
+        fc,
+        bb,
+        1200,
+        1200,
+        (e) => e.properties.highway !== undefined
+      );
+
+      const graphData = await fetch("graphBigFootways.json");
+      const graph = await graphData.json();
+
+      // const graph = featureCollectionToGraph(fc, bb, 1200, 1200,        (e) => {
+      //   return e.properties.highway === "footway";
+      // });
+
+      // console.log(JSON.stringify(graph));
+
+      drawDistanceGraph(graph);
+    }
+
+    fetchBigMap();
+  </script>
+</html>
+`
