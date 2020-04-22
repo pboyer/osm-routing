@@ -23,12 +23,12 @@
       <div style="padding-bottom: 20px;">
         <h4>Raleigh, NC Sidewalk Connectivity</h4>
         <p>Given a point in Raleigh, NC, this page draws the distance to every other sidewalk in the sidewalk network.
-          It uses sidewalk data from open street maps and dijkstra's algorithm to determine the distances.
+          It uses sidewalk data from open street maps and dijkstra's algorithm.
         </p>
-        <span style="color: grey; font-style: italic;">Click a point on the map to draw the distance</span>
+        <span style="color: grey; font-style: italic;">Click a point on the map</span>
       </div>
       <div>
-        <div id="loading" style="color: grey">Loading map data...</div>
+        <div id="loading" style="color: grey">Wait for it...</div>
       </div>
       <canvas
         id="canvas"
@@ -365,30 +365,6 @@
         verts.push([ax, ay]);
 
         return verts.length - 1;
-
-        // const ahash = vertHash(ax, ay);
-        // if (!vertHashes[ahash]) {
-        //   vertHashes[ahash] = verts.length;
-        //   // verts.push([ax, ay]);
-        //   verts.push(scalePt(ax, ay));
-        //   return vertHashes[ahash];
-        // } else {
-        //   const hi = vertHashes[ahash];
-        //   const [hax, hay] = verts[hi];
-        //   // console.log(pointDist(hax, hay, ax, ay));
-        // }
-
-        // return vertHashes[ahash];
-      }
-
-      // this is hacky
-      function vertHash(x, y) {
-        const factor = 1e7;
-        return (
-          Math.round(x * factor) / factor +
-          "," +
-          Math.round(x * factor) / factor
-        );
       }
 
       for (const elem of fc.features) {
@@ -528,8 +504,6 @@
     // how to assign grading rubric to streets?
 
     async function buildGraph() {
-      console.log("fetch");
-
       const data = await fetch("mapBig.json");
       const fc = await data.json();
 
@@ -542,11 +516,7 @@
         bb,
         1600,
         1600,
-        (e) => e.properties.highway === "footway"
       );
-
-      // const graphData = await fetch("graphBigFootways.json");
-      // const graph = await graphData.json();
 
       const graph = featureCollectionToGraph(fc, bb, 1600, 1600, (e) => {
         return e.properties.highway === "footway";
@@ -555,59 +525,52 @@
       console.log(JSON.stringify(graph));
     }
 
+    async function fetchImage(url) {
+      const img = new Image();
+      const promise = new Promise((resolve) => {
+        img.onload = () => resolve(img)
+      });
+      img.src = url;
+      return promise;
+    }
+
     async function fetchBigMap() {
-      const [fc, graph] = await Promise.all([
-        (await fetch("mapBig.json")).json(),
+      const [img, graph] = await Promise.all([
+        (await fetchImage("map.png")),
         (await fetch("graphBigFootways.json")).json(),
       ]);
 
       document.getElementById("loading").remove();
 
-      const bb = featureCollectionBoundingBox(fc);
+      ctx.clearRect(0,0,1600,1600);
+      ctx.drawImage(img, 0, 0);
+      let timeouts = drawDistanceGraph(graph, 2113);
 
-      drawFeatureCollection(
-        fc,
-        bb,
-        1600,
-        1600
-      );
+      const index = new KDBush(graph.verts);
 
-      const dataURL = canvas.toDataURL();
+      canvas.addEventListener("click", (e) => {
+        for (const timeout of timeouts) {
+          clearTimeout(timeout);
+        }
 
-      const img = new Image();
-      img.onload = () => {
+        const rect = e.target.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const results = index.within(2 * x, 2 * y, 50);
+
+        results.sort((a, b) => {
+          const [ax, ay] = graph.verts[a];
+          const [bx, by] = graph.verts[b];
+          const da = pointDist(x, y, ax, ay);
+          const db = pointDist(x, y, bx, by);
+          return db - da;
+        });
+
         ctx.clearRect(0,0,1600,1600);
         ctx.drawImage(img,0,0);
-        let timeouts = drawDistanceGraph(graph, 2113);
-
-        const index = new KDBush(graph.verts);
-
-        canvas.addEventListener("click", (e) => {
-          for (const timeout of timeouts) {
-            clearTimeout(timeout);
-          }
-
-          const rect = e.target.getBoundingClientRect();
-          const x = e.clientX - rect.left;
-          const y = e.clientY - rect.top;
-
-          const results = index.within(2 * x, 2 * y, 50);
-
-          results.sort((a, b) => {
-            const [ax, ay] = graph.verts[a];
-            const [bx, by] = graph.verts[b];
-            const da = pointDist(x, y, ax, ay);
-            const db = pointDist(x, y, bx, by);
-            return db - da;
-          });
-
-          ctx.clearRect(0,0,1600,1600);
-          ctx.drawImage(img,0,0);
-          timeouts = drawDistanceGraph(graph, results[0]);
-        });
-      };
-    
-      img.src = dataURL;
+        timeouts = drawDistanceGraph(graph, results[0]);
+      });
     }
 
     fetchBigMap();
