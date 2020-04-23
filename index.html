@@ -5,7 +5,8 @@
     <title>Raleigh, NC Sidewalks</title>
     <style>
       body {
-        font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Oxygen, Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
         padding: 20px;
       }
 
@@ -16,27 +17,54 @@
         margin-left: auto;
         margin-right: auto;
       }
+
+      #canvas {
+        cursor: pointer;
+      }
+
+      #hover {
+        opacity: 0;
+        transition: opacity 0.2s;
+        background-color: white;
+        color: #222;
+        font-weight: normal;
+        font-size: 13px;
+        padding: 6px;
+        box-shadow: 0px 5px 5px rgba(0,0,0,0.3);
+        border-radius: 2px;
+        z-index: 1;
+        position: absolute;
+        left: 0;
+        top: 0;
+        pointer-events: none;
+      }
     </style>
   </head>
   <body>
     <div id="wrapper">
       <div style="padding-bottom: 20px;">
-        <h4>Raleigh, NC Sidewalk Connectivity</h4>
-        <p>Given a point in Raleigh, NC, this page draws the distance to every other sidewalk in the sidewalk network.
-          It uses sidewalk data from open street maps and dijkstra's algorithm.
+        <h4>Raleigh, NC Sidewalks</h4>
+        <p>
+          Given a point in Raleigh, NC, this page draws the distance to every
+          other sidewalk in the sidewalk network. It uses sidewalk data from
+          open street maps and dijkstra's algorithm.
         </p>
-        <span style="color: grey; font-style: italic;">Click a point on the map</span>
+        <p style="padding-top: 10px; text-align: center; font-weight: bold;">
+          Click a point on the map! Hover to get specific walking distances and times.
+        </p>
       </div>
       <div>
-        <div id="loading" style="color: grey">Wait for it...</div>
+        <div id="loading" style="color: grey;">Wait for it...</div>
       </div>
+
+      <div id="hover"></div>
       <canvas
         id="canvas"
         style="width: 800px; height: 800px;"
         width="1600"
         height="1600"
       ></canvas>
-  </div>
+    </div>
   </body>
 
   <script src="flatqueue.js"></script>
@@ -135,12 +163,12 @@
 
       const chunkSize = 10;
       const timeouts = [];
-      for (let i = 0; i < edges.length; i+=chunkSize) {
-        timeouts.push(setTimeout(
-          () => {
-            drawChunk(i, Math.min(edges.length, i + chunkSize))
-          }
-        , 0));
+      for (let i = 0; i < edges.length; i += chunkSize) {
+        timeouts.push(
+          setTimeout(() => {
+            drawChunk(i, Math.min(edges.length, i + chunkSize));
+          }, 0)
+        );
       }
 
       return timeouts;
@@ -263,7 +291,6 @@
 
       return dists;
     }
-
 
     function featureCollectionBoundingBox(fc) {
       const bb = boundingBoxNew();
@@ -398,10 +425,14 @@
         }
       }
 
-      return graphNew(
-        verts.map((a) => scalePt(a[0], a[1])),
-        edges
-      );
+      return {
+        boundingBox: bb,
+        vertsUnscaled: verts,
+        graph: graphNew(
+          verts.map((a) => scalePt(a[0], a[1])),
+          edges
+        )
+      }
     }
 
     function drawFeatureCollection(fc, bb, dwgWidth, dwgHeight, filter) {
@@ -484,12 +515,11 @@
       return bb;
     }
 
-
     function drawDistanceGraph(graph, i) {
       const startVert = i ?? (graph.verts.length * Math.random()) | 0;
       const dists = dijkstra(graph, startVert);
 
-      return drawVertexDists(graph, dists);
+      return [drawVertexDists(graph, dists), dists];
     }
 
     // this draws a grid testing dijkstra
@@ -511,12 +541,7 @@
 
       const bb = featureCollectionBoundingBox(fc);
 
-      drawFeatureCollection(
-        fc,
-        bb,
-        1600,
-        1600,
-      );
+      drawFeatureCollection(fc, bb, 1600, 1600);
 
       const graph = featureCollectionToGraph(fc, bb, 1600, 1600, (e) => {
         return e.properties.highway === "footway";
@@ -528,36 +553,52 @@
     async function fetchImage(url) {
       const img = new Image();
       const promise = new Promise((resolve) => {
-        img.onload = () => resolve(img)
+        img.onload = () => resolve(img);
       });
       img.src = url;
       return promise;
     }
 
+    function measure(lat1, lon1, lat2, lon2) {
+      // generally used geo measurement function
+      var R = 6378.137; // Radius of earth in KM
+      var dLat = (lat2 * Math.PI) / 180 - (lat1 * Math.PI) / 180;
+      var dLon = (lon2 * Math.PI) / 180 - (lon1 * Math.PI) / 180;
+      var a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      var c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      var d = R * c;
+      return d * 1000; // meters
+    }
+
     async function fetchBigMap() {
-      const [img, graph] = await Promise.all([
-        (await fetchImage("map.png")),
+      const [img, { boundingBox, vertsUnscaled, graph }] = await Promise.all([
+        await fetchImage("map.png"),
         (await fetch("graphBigFootways.json")).json(),
       ]);
 
+      const dist = measure(...boundingBox);
+
+      const distFactor = dist / Math.sqrt(1600 * 1600 * 2);
+
       document.getElementById("loading").remove();
 
-      ctx.clearRect(0,0,1600,1600);
+      ctx.clearRect(0, 0, 1600, 1600);
       ctx.drawImage(img, 0, 0);
-      let timeouts = drawDistanceGraph(graph, 2113);
+      let [timeouts, dists] = drawDistanceGraph(graph, 2113);
 
       const index = new KDBush(graph.verts);
 
-      canvas.addEventListener("click", (e) => {
-        for (const timeout of timeouts) {
-          clearTimeout(timeout);
-        }
-
+      const closestPoints = (e, dist) => {
         const rect = e.target.getBoundingClientRect();
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
 
-        const results = index.within(2 * x, 2 * y, 50);
+        const results = index.within(2 * x, 2 * y, dist);
 
         results.sort((a, b) => {
           const [ax, ay] = graph.verts[a];
@@ -567,13 +608,77 @@
           return db - da;
         });
 
-        ctx.clearRect(0,0,1600,1600);
-        ctx.drawImage(img,0,0);
-        timeouts = drawDistanceGraph(graph, results[0]);
+        return results;
+      };
+
+      let indicatorTimeout;
+
+      canvas.addEventListener("mouseleave", (e) => {
+        if (indicatorTimeout) {
+          clearTimeout(indicatorTimeout);
+        }
+        const hover = document.getElementById("hover");
+        hover.style.opacity = 0;
+      });
+
+      canvas.addEventListener("mousemove", (e) => {
+        if (indicatorTimeout) {
+          clearTimeout(indicatorTimeout);
+        }
+      
+        const hover = document.getElementById("hover");
+        hover.style.opacity = 0;
+
+        indicatorTimeout = setTimeout(() => {
+          const pts = closestPoints(e, 15);
+
+          if (pts.length === 0) {
+            hover.style.opacity = 0;
+            return;
+          }
+
+          const closest = pts[0];
+          const dist = dists[closest];
+          const [x, y] = graph.verts[closest];
+
+          if (dist === Number.POSITIVE_INFINITY) {
+            hover.style.opacity = 0;
+            return;
+          }
+
+          const rect = e.target.getBoundingClientRect();
+
+          const bodyRect = document.body.getBoundingClientRect();
+
+          hover.style.opacity = 1;
+          hover.style.left = ((rect.left + (rect.width * x) / 1600) + bodyRect.x + 5)+ "px";
+          hover.style.top =
+            (rect.top + (rect.height * y) / 1600).toString() - bodyRect.y + "px";
+
+          const distMeters = dist / distFactor;
+          const distMiles = distMeters / 1609.343;
+
+          hover.innerHTML = "~" + distMiles.toFixed(2) + " mi, ~" + (60 * (distMiles / 3.1)).toFixed() + "minutes walking";
+        }, 250);
+      });
+
+      canvas.addEventListener("click", (e) => {
+        for (const timeout of timeouts) {
+          clearTimeout(timeout);
+        }
+
+        const hover = document.getElementById("hover");
+        hover.style.opacity = 0;
+
+        const results = closestPoints(e, 50);
+
+        ctx.clearRect(0, 0, 1600, 1600);
+        ctx.drawImage(img, 0, 0);
+        [timeouts, dists] = drawDistanceGraph(graph, results[0]);
       });
     }
 
+    // buildGraph();
     fetchBigMap();
   </script>
 </html>
-
