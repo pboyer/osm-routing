@@ -614,8 +614,7 @@
       };
 
       let indicatorTimeout;
-
-
+      
       canvas.addEventListener("mouseleave", (e) => {
         if (indicatorTimeout) {
           clearTimeout(indicatorTimeout);
@@ -623,7 +622,7 @@
         const hover = document.getElementById("hover");
         hover.style.opacity = 0;
       });
-      
+
 
       canvas.addEventListener("mousemove", (e) => {
         if (indicatorTimeout) {
