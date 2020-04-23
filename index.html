@@ -545,7 +545,11 @@
       drawFeatureCollection(fc, bb, 1600, 1600);
 
       const graph = featureCollectionToGraph(fc, bb, 1600, 1600, (e) => {
-        return e.properties.highway === "footway";
+        if (e.properties.highway === "cycleway" && e.properties.foot === "designated") {
+          console.log(e);
+        }
+
+        return e.properties.highway === "footway" || (e.properties.highway === "cycleway" && e.properties.foot === "designated");
       });
 
       console.log(JSON.stringify(graph));
@@ -661,7 +665,7 @@
           const distMeters = dist / distFactor;
           const distMiles = distMeters / 1609.343;
 
-          hover.innerHTML = "~" + distMiles.toFixed(2) + " mi, ~" + (60 * (distMiles / 3.1)).toFixed() + "minutes walking";
+          hover.innerHTML = "~" + distMiles.toFixed(2) + " mi, ~" + (60 * (distMiles / 3.1)).toFixed() + " min walking";
         }, 250);
       });
 
