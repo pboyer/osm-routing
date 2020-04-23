@@ -1,6 +1,6 @@
 {
   "name": "raleighbikeways",
-  "version": 1,
+  "version": 2,
   "alias": ["raleigh-sidewalks.ptrbyr.com"],
   "github": {
     "enabled": true
