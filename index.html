@@ -26,7 +26,7 @@
         opacity: 0;
         transition: opacity 0.2s;
         background-color: white;
-        color: #222;
+        color: gray;
         font-weight: normal;
         font-size: 13px;
         padding: 6px;
@@ -49,12 +49,12 @@
           other sidewalk in the sidewalk network. It uses sidewalk data from
           open street maps and dijkstra's algorithm.
         </p>
-        <p style="padding-top: 30px; text-align: center; font-weight: bold;">
+        <p id="instructions" style="display: none; padding-top: 30px; text-align: center; font-weight: bold;">
           Click to set the starting point. Hover to get specific walking distances and times.
         </p>
       </div>
       <div>
-        <div id="loading" style="color: grey;">Wait for it...</div>
+        <div id="loading" style="padding-top: 30px; color: grey; text-align: center;">Wait for it...</div>
       </div>
 
       <div id="hover"></div>
@@ -537,6 +537,7 @@
       const data = await fetch("mapBig.json");
       const fc = await data.json();
 
+      document.getElementById("instructions").style.display = "block";
       document.getElementById("loading").remove();
 
       const bb = featureCollectionBoundingBox(fc);
@@ -585,6 +586,7 @@
 
       const distFactor = dist / Math.sqrt(1600 * 1600 * 2);
 
+      document.getElementById("instructions").style.display = "block";
       document.getElementById("loading").remove();
 
       ctx.clearRect(0, 0, 1600, 1600);
@@ -630,7 +632,7 @@
         hover.style.opacity = 0;
 
         indicatorTimeout = setTimeout(() => {
-          const pts = closestPoints(e, 15);
+          const pts = closestPoints(e, 20);
 
           if (pts.length === 0) {
             hover.style.opacity = 0;
